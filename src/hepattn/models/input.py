@@ -1,10 +1,10 @@
 from torch import Tensor, nn
-
+import torch
 from hepattn.utils.tensor_utils import concat_tensors, get_module_dtype, get_torch_dtype
 
 
 class InputNet(nn.Module):
-    def __init__(self, input_name: str, net: nn.Module, fields: list[str], posenc: nn.Module | None = None, input_dtype: str | None = None):
+    def __init__(self, input_name: str, net: nn.Module, fields: list[str], posenc: nn.Module | None = None, input_dtype: str | None = None, gate_scale: float = 1.0, trainable_gate: bool = False):
         super().__init__()
         """A wrapper that takes a list of input features, concatenates them, and passes them
         through a dense layer followed by an optional positional encoding module.
@@ -37,6 +37,11 @@ class InputNet(nn.Module):
         else:
             self.input_dtype = self.output_dtype
 
+        if trainable_gate:
+            self.gate = nn.Parameter(torch.tensor(float(gate_scale)))
+        else:
+            self.register_buffer("gate", torch.tensor(float(gate_scale)))
+
     def forward(self, inputs: dict[str, Tensor]) -> Tensor:
         """Embed the set of input features into an embedding.
 
@@ -60,5 +65,4 @@ class InputNet(nn.Module):
         # dtype the rest of the model is using
         if self.input_dtype != self.output_dtype:
             x = x.to(dtype=self.output_dtype)
-
-        return x
+        return x * self.gate
