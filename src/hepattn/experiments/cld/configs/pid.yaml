@@ -1,0 +1,135 @@
+name: CLD_8_320_10MeV_neutrals_pid
+model:
+  model:
+    init_args:
+      tasks:
+        class_path: torch.nn.ModuleList
+        init_args:
+          modules:
+            - class_path: hepattn.models.task.ObjectValidTask
+              init_args:
+                name: flow_valid
+                input_object: query
+                output_object: flow
+                target_object: particle
+                losses:
+                  object_bce: 0.1
+                costs:
+                  object_bce: 1.0
+                dim: &dim 256
+                null_weight: 1.0
+                mask_queries: false
+                has_intermediate_loss: False
+
+            - class_path: hepattn.models.task.ObjectHitMaskTask
+              init_args:
+                name: flow_vtxd_assignment
+                input_constituent: vtxd
+                input_object: query
+                output_object: flow
+                target_object: particle
+                has_intermediate_loss: False
+                losses:
+                  mask_bce: 0.25
+                  mask_dice: 0.75
+                  #mask_focal: 1.0
+                costs:
+                  #mask_bce: 1.0
+                  mask_dice: 1.0
+                  #mask_focal: 1.0
+                dim: *dim
+                null_weight: 1.0
+
+            - class_path: hepattn.models.task.ObjectHitMaskTask
+              init_args:
+                name: flow_trkr_assignment
+                input_constituent: trkr
+                input_object: query
+                output_object: flow
+                target_object: particle
+                has_intermediate_loss: False
+                losses:
+                  mask_bce: 0.25
+                  mask_dice: 0.75
+                  #mask_focal: 1.0
+                costs:
+                  #mask_bce: 1.0
+                  mask_dice: 1.0
+                  #mask_focal: 1.0
+                dim: *dim
+                null_weight: 1.0
+
+            - class_path: hepattn.models.task.ObjectHitMaskTask
+              init_args:
+                name: flow_ecal_assignment
+                input_constituent: ecal
+                input_object: query
+                output_object: flow
+                target_object: particle
+                target_field: valid
+                has_intermediate_loss: False
+                losses:
+                  mask_bce: 0.25
+                  mask_dice: 0.75
+                  #mask_focal: 1.0
+                costs:
+                  #mask_bce: 1.0
+                  mask_dice: 1.0
+                  #mask_focal: 1.0
+                dim: *dim
+                null_weight: 1.0
+
+            - class_path: hepattn.models.task.ObjectHitMaskTask
+              init_args:
+                name: flow_hcal_assignment
+                input_constituent: hcal
+                input_object: query
+                output_object: flow
+                target_object: particle
+                target_field: valid
+                has_intermediate_loss: False
+                losses:
+                  mask_bce: 0.25
+                  mask_dice: 0.75
+                  #mask_focal: 1.0
+                costs:
+                  #mask_bce: 1.0
+                  mask_dice: 1.0
+                  #mask_focal: 1.0
+                dim: *dim
+                null_weight: 1.0
+
+            - class_path: hepattn.models.task.ObjectHitMaskTask
+              init_args:
+                name: flow_muon_assignment
+                input_constituent: muon
+                input_object: query
+                output_object: flow
+                target_object: particle
+                target_field: valid
+                has_intermediate_loss: False
+                losses:
+                  mask_bce: 0.25
+                  mask_dice: 0.75
+                  #mask_focal: 1.0
+                costs:
+                  #mask_bce: 1.0
+                  mask_dice: 1.0
+                  #mask_focal: 1.0
+                dim: *dim
+                null_weight: 1.0
+
+
+            - class_path: hepattn.models.task.ClassificationTask
+              init_args:
+                name: pid
+                input_object: query
+                output_object: pid
+                target_object: particle
+                classes: [is_muon, is_electron, is_photon, is_charged_hadron, is_neutral_hadron, is_other]  # priority = list order (left = highest)
+                dim: *dim
+                class_weights: {is_muon: 24.45, is_electron: 7.8, is_photon: 1.0, is_charged_hadron: 1.1, is_neutral_hadron: 8.5, is_other: 566}
+                loss_weight: 1.0
+                multilabel: false
+                permute_loss: true
+                has_intermediate_loss: false

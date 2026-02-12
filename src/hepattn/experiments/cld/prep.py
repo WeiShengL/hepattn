@@ -100,6 +100,13 @@ relations_links = {
         ("MUON", "YokeBarrelCollection"),
         ("MUON", "YokeEndcapCollection"),
     ],
+    # "SiTrackMCTruthLink": [
+    "MCTruthSiTracksLink": [
+        ("SiTracks_Refitted", "MCParticles"),
+    ],
+    "ClusterMCTruthLink": [
+        ("PandoraClusters", "MCParticles"),
+    ],
 }
 
 # Specify the mask/links which use particle based links
@@ -388,6 +395,8 @@ output_masks = [
     ("particle", "hco"),
     ("particle", "msb"),
     ("particle", "mse"),
+    ("particle", "sitrack"),
+    ("particle", "topocluster"),
     ("pandora", "sitrack"),
     ("pandora", "topocluster"),
     ("sitrack", "vtb"),

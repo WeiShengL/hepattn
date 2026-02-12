@@ -5,12 +5,24 @@ import torch
 from lightning import LightningDataModule
 from scipy.sparse import csr_array, csr_matrix
 from torch.utils.data import DataLoader
+from itertools import islice
 
 from hepattn.utils.array_utils import masked_angle_diff_last_axis, masked_diff_last_axis
 from hepattn.utils.lrsm_dataset import LRSMDataset
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
+def event_filenames_to_sample_uid(event_filename):
+    """
+    Example: reco_p8_ee_tt_ecm365_12012864_7_329 -> 1201286400070329
+    (job_id + proc_id(zfill4) + event_id(zfill4))
+    """
+    p = Path(event_filename)  # accepts str or Path
+    id_parts = str(p.stem.replace("_condor", "")).split("_")
+    job_id = id_parts[-3]
+    proc_id = id_parts[-2]
+    event_id = id_parts[-1]
+    return int(job_id + proc_id.zfill(4) + event_id.zfill(4))
 
 class CLDDataset(LRSMDataset):
     def __init__(
@@ -19,6 +31,7 @@ class CLDDataset(LRSMDataset):
         num_samples: int,
         inputs: dict[str, list[str]],
         targets: dict[str, list[str]],
+        filelist_path: str | None = None,
         input_dtype: str = "float32",
         target_dtype: str = "float32",
         input_pad_value: float = 0.0,
@@ -99,7 +112,14 @@ class CLDDataset(LRSMDataset):
         self.calo_energy_thresh = calo_energy_thresh
 
         # Setup the number of events that will be used
-        event_filenames = list(Path(self.dirpath).rglob("*reco*.npz"))
+        if filelist_path is not None:
+            with open(filelist_path) as f:
+                if num_samples == -1:
+                    event_filenames = [Path(line.strip()) for line in f]
+                else:
+                    event_filenames = [Path(line.strip()) for line in islice(f, num_samples)]
+        else:
+            event_filenames = list(Path(self.dirpath).rglob("*reco*.npz"))
         num_available_events = len(event_filenames)
         num_requested_events = num_available_events if num_samples == -1 else num_samples
         self.num_samples = min(num_available_events, num_requested_events)
@@ -107,31 +127,51 @@ class CLDDataset(LRSMDataset):
         print(f"Found {num_available_events} available events, {num_requested_events} requested, {self.num_samples} used")
 
         # Allow us to select events by index
-        self.event_filenames = event_filenames[: self.num_samples]
+        # self.event_filenames = event_filenames[: self.num_samples]
 
-        def event_filenames_to_sample_id(event_filename):
-            id_parts = str(event_filename.stem.replace("_condor", "")).split("_")
-            job_id = id_parts[-3]
-            proc_id = id_parts[-2]
-            event_id = id_parts[-1]
-            return int(job_id + proc_id.zfill(4) + event_id.zfill(4))
+        # self.event_filenames = [str(p) for p in event_filenames[: self.num_samples]]  # store strings, not Paths
+        # self.sample_ids = [event_filenames_to_sample_id(f) for f in self.event_filenames]
+        # self.sample_ids_to_event_filenames = None
+
+        # self.event_filenames = event_filenames[: self.num_samples]  # keep Path
+        # self.sample_ids = [event_filenames_to_sample_id(p) for p in self.event_filenames]
+
+
 
         # Define the sample identifiers unique to each sample, uses the file name
         # Example: reco_p8_ee_tt_ecm365_12012864_7_329 -> 1201286470329
-        self.sample_ids = [event_filenames_to_sample_id(f) for f in self.event_filenames]
-        self.sample_ids_to_event_filenames = {self.sample_ids[i]: str(self.event_filenames[i]) for i in range(len(self.sample_ids))}
+        # self.sample_ids = [event_filenames_to_sample_id(f) for f in self.event_filenames]
+        # self.sample_ids_to_event_filenames = {self.sample_ids[i]: str(self.event_filenames[i]) for i in range(len(self.sample_ids))}
+
+        self.event_filenames = [str(p) for p in event_filenames[: self.num_samples]]
+        self.sample_ids_to_event_filenames = None
+        self.sample_ids = range(self.num_samples)
 
     def load_sample(self, sample_id: int) -> dict[str, np.ndarray] | None:
         """Loads a single CLD event from a preprocessed npz file."""
-        event_filename = self.sample_ids_to_event_filenames[sample_id]
+        # event_filename = self.sample_ids_to_event_filenames[sample_id]
+        event_filename = self.event_filenames[sample_id]
 
         # Load the event, taking care to deal with partially preprocessed / malformed events
         try:
             with np.load(event_filename, allow_pickle=True) as archive:
                 event = {key: archive[key] for key in archive.files}
-        except EOFError as exception:
-            print(f"Encountered exception {exception} while loading sample {sample_id} so skipping it")
-            return None
+
+        except Exception as e:
+            # This will show up in the worker stdout and slurm output
+            print("\n" + "=" * 120, flush=True)
+            print(f"FAILED sample_id={sample_id}", flush=True)
+            print(f"FILE={event_filename}", flush=True)
+
+            # optional but very useful:
+            try:
+                print(f"UID={event_filenames_to_sample_uid(event_filename)}", flush=True)
+            except Exception:
+                pass
+
+            print(f"EXC={type(e).__name__}: {e}", flush=True)
+            print("=" * 120 + "\n", flush=True)
+            raise
 
         # Rename from legacy
         aliases = {
@@ -222,6 +262,13 @@ class CLDDataset(LRSMDataset):
         add_cylindrical_coords("pandora", "mom")
         add_cylindrical_coords("pandora", "ref")
 
+        # Add extra coordinates for topocluster positions (only if topocluster is used as input)
+        if "topocluster" in self.inputs:
+            convert_mm_to_m("topocluster", "pos")
+            add_cylindrical_coords("topocluster", "pos")
+            add_conformal_coords("topocluster", "pos")
+            add_log_energy("topocluster")
+
         event["particle.mom.qopt"] = event["particle.charge"] / event["particle.mom.r"]
         event["pandora.mom.qopt"] = event["pandora.charge"] / event["pandora.mom.r"]
 
@@ -243,6 +290,10 @@ class CLDDataset(LRSMDataset):
         event["pandora_valid"] = np.full_like(event["pandora.PDG"], True, np.bool)
         event["sitrack_valid"] = np.full_like(event["sitrack.chi2"], True, np.bool)
 
+        # Only create topocluster_valid if topocluster is used as an input
+        if "topocluster" in self.inputs:
+            event["topocluster_valid"] = np.full_like(event["topocluster.energy"], True, np.bool)
+
         num_particles = len(event["particle_valid"])
 
         particle_hit_masks = [("particle", hit) for hit in hits]
@@ -250,6 +301,22 @@ class CLDDataset(LRSMDataset):
         sitrack_hit_masks = [("sitrack", hit) for hit in trkr_hits]
 
         masks = particle_hit_masks + pandora_hit_masks + sitrack_hit_masks
+
+        # Only load topocluster-to-hit masks if topocluster is used as an input
+        topocluster_hit_masks = [("topocluster", hit) for hit in calo_hits] if "topocluster" in self.inputs else []
+
+        # Masks linking particles to reconstructed objects (tracks, clusters) - only if used as inputs
+        particle_reco_masks = []
+        pandora_reco_masks = []
+        if "sitrack" in self.inputs:
+            particle_reco_masks.append(("particle", "sitrack"))
+            pandora_reco_masks.append(("pandora", "sitrack"))
+        if "topocluster" in self.inputs:
+            particle_reco_masks.append(("particle", "topocluster"))
+            pandora_reco_masks.append(("pandora", "topocluster"))
+
+            masks = particle_hit_masks + pandora_hit_masks + sitrack_hit_masks + topocluster_hit_masks + particle_reco_masks + pandora_reco_masks
+
 
         def load_csr_mask(src, tgt):
             data = (event[f"{src}_to_{tgt}_data"], event[f"{src}_to_{tgt}_indices"], event[f"{src}_to_{tgt}_indptr"])
@@ -412,6 +479,40 @@ class CLDDataset(LRSMDataset):
         # Apply hit cuts based on angular deflection
         # TODO: Clean this up...
         for item_name, cut in self.particle_hit_deflection_cuts.items():
+            # Check for empty subdetector (zero hits in event) - skip this sample entirely
+            num_hits = event[f"{item_name}.time"].shape[0]
+            if num_hits == 0:
+                print("\n" + "=" * 120, flush=True)
+                print(f"WARNING: Empty subdetector detected!", flush=True)
+                print(f"  sample_id    = {sample_id}", flush=True)
+                print(f"  file         = {event_filename}", flush=True)
+                print(f"  subdetector  = {item_name}", flush=True)
+                print(f"  num_hits     = {num_hits}", flush=True)
+                print(f"  num_particles= {num_particles}", flush=True)
+                try:
+                    print(f"  sample_uid   = {event_filenames_to_sample_uid(event_filename)}", flush=True)
+                except Exception:
+                    pass
+                print("=" * 120 + "\n", flush=True)
+                continue  # Skip deflection cuts for empty subdetectors
+                return None
+            # Check for empty subdetector (zero hits in event)
+            # num_hits = event[f"{item_name}.time"].shape[0]
+            # if num_hits == 0:
+            #     print("\n" + "=" * 120, flush=True)
+            #     print(f"WARNING: Empty subdetector detected!", flush=True)
+            #     print(f"  sample_id    = {sample_id}", flush=True)
+            #     print(f"  file         = {event_filename}", flush=True)
+            #     print(f"  subdetector  = {item_name}", flush=True)
+            #     print(f"  num_hits     = {num_hits}", flush=True)
+            #     print(f"  num_particles= {num_particles}", flush=True)
+            #     try:
+            #         print(f"  sample_uid   = {event_filenames_to_sample_uid(event_filename)}", flush=True)
+            #     except Exception:
+            #         pass
+            #     print("=" * 120 + "\n", flush=True)
+            #     continue  # Skip deflection cuts for empty subdetectors
+
             for _ in range(int(cut["num_passes"])):
                 # Indices for sorting based on time
                 idx = np.argsort(event[f"{item_name}.time"])
@@ -445,6 +546,10 @@ class CLDDataset(LRSMDataset):
         # Apply hit cuts based on distance between consecutive hits on particles
         # TODO: Clean this up...
         for item_name, cut in self.particle_hit_separation_cuts.items():
+            # Check for empty subdetector (zero hits in event) - skip this sample entirely
+            num_hits = event[f"{item_name}.time"].shape[0]
+            if num_hits == 0:
+                return None
             for _ in range(int(cut["num_passes"])):
                 idx = np.argsort(event[f"{item_name}.time"])
 
@@ -546,6 +651,11 @@ class CLDDataset(LRSMDataset):
         for hit in hits + list(self.merge_inputs.keys()):
             event[f"particle.num_{hit}"] = event[f"particle_{hit}_valid"].sum(-1)
 
+        # Also calculate particle counts for reconstructed objects (sitrack, topocluster)
+        for reco_obj in ["sitrack", "topocluster"]:
+            if f"particle_{reco_obj}_valid" in event:
+                event[f"particle.num_{reco_obj}"] = event[f"particle_{reco_obj}_valid"].sum(-1)
+
         # Remove invalid particle slots
         # Assue that particle axis is always 0, make a copy as we will also change particle_valid
         particle_valid = np.copy(event["particle_valid"])
@@ -568,6 +678,7 @@ class CLDDataset(LRSMDataset):
 
         # Add any metadata
         event["sample_id"] = sample_id
+        event["sample_uid"] = event_filenames_to_sample_uid(event_filename)  # stable ID derived from filename
 
         return event
 
@@ -599,10 +710,22 @@ class CLDDataModule(LightningDataModule):
         self.pin_memory = pin_memory
         self.kwargs = kwargs
 
+    def prepare_data(self):
+        # runs only on rank 0 by default
+        for d in [self.train_dir, self.val_dir]:
+            manifest = Path(d) / "reco_files.txt"
+            if manifest.exists():
+                continue
+            with manifest.open("w") as f:
+                for p in Path(d).rglob("*reco*.npz"):
+                    f.write(str(p) + "\n")
+
     def setup(self, stage: str):
         if stage == "fit":
-            self.train_dset = CLDDataset(dirpath=self.train_dir, num_samples=self.num_train, **self.kwargs)
-            self.val_dset = CLDDataset(dirpath=self.val_dir, num_samples=self.num_val, **self.kwargs)
+            train_list = str(Path(self.train_dir) / "reco_files.txt")
+            val_list   = str(Path(self.val_dir) / "reco_files.txt")
+            self.train_dset = CLDDataset(dirpath=self.train_dir, num_samples=self.num_train, filelist_path=train_list, **self.kwargs)
+            self.val_dset   = CLDDataset(dirpath=self.val_dir,   num_samples=self.num_val,   filelist_path=val_list,   **self.kwargs)
             print(f"Created training dataset with {len(self.train_dset):,} events")
             print(f"Created validation dataset with {len(self.val_dset):,} events")
 

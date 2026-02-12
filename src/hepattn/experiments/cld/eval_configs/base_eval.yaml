@@ -1,0 +1,144 @@
+eval:
+  # Define metrics which give a score between pairs of objects which can
+  # be used to match the objects to each other
+  match_metrics:
+    default:
+      sihit:
+        weight: 1.0
+        metric: iou
+        field: valid
+
+      ecal:
+        weight: 1.0
+        metric: iou
+        field: valid
+
+      hcal:
+        weight: 1.0
+        metric: iou
+        field: valid
+
+  # Define binary metrics which evaluate to true if all of its conditions are met
+  binary_metrics:
+    charged_reconstructed:
+      - hit: sihit
+        thresh: 0.5
+        metric: eff
+        field: valid
+
+      - hit: sihit
+        thresh: 0.5
+        metric: pur
+        field: valid
+
+      - hit: ecal
+        thresh: 0.5
+        metric: eff
+        field: valid
+
+      - hit: ecal
+        thresh: 0.5
+        metric: pur
+        field: valid
+
+      - hit: hcal
+        thresh: 0.5
+        metric: eff
+        field: valid
+
+      - hit: hcal
+        thresh: 0.5
+        metric: pur
+        field: valid
+
+    neutral_reconstructed:
+      - hit: ecal
+        thresh: 0.5
+        metric: eff
+        field: valid
+
+      - hit: ecal
+        thresh: 0.5
+        metric: pur
+        field: valid
+
+      - hit: hcal
+        thresh: 0.5
+        metric: eff
+        field: valid
+
+      - hit: hcal
+        thresh: 0.5
+        metric: pur
+        field: valid
+
+  selections:
+    charged_hadron_reconstructable:
+      - "is_charged_hadron"
+      - "is_primary"
+      - "mom.r >= 0.1"
+      - "mom.abs_eta <= 2.44"
+      - "vtx.r <= 50"
+      - "num_sihit >= 4"
+      - "isolation >= 0.02"
+      - "calib_energy_ecal >= 0.1"
+      - "calib_energy_hcal >= 0.1"
+
+    neutral_hadron_reconstructable:
+      - "is_neutral_hadron"
+      - "is_primary"
+      - "mom.r >= 0.1"
+      - "mom.abs_eta <= 2.44"
+      - "vtx.r <= 50"
+      - "isolation >= 0.02"
+      - "calib_energy_ecal >= 0.1"
+      - "calib_energy_hcal >= 0.1"
+
+    electron_reconstructable:
+      - "is_electron"
+      - "is_primary"
+      - "mom.r >= 0.1"
+      - "mom.abs_eta <= 2.44"
+      - "vtx.r <= 50"
+      - "num_sihit >= 4"
+      - "num_ecal >= 10"
+      - "num_hcal < 10"
+
+    photon_reconstructable:
+      - "is_photon"
+      - "is_primary"
+      - "mom.abs_eta <= 2.44"
+      - "vtx.r <= 50"
+      - "mom.r >= 0.1"
+      - "num_ecal >= 10"
+      - "num_hcal < 10"
+
+    muon_reconstructable:
+      - "is_muon"
+      - "mom.r >= 0.1"
+      - "num_sihit >= 4"
+      - "num_ecal >= 10"
+      - "num_hcal >= 10"
+      - "num_muon >= 4"
+
+    charged_hadron_reconstructable_loose:
+      - "is_charged_hadron"
+      - "mom.r >= 0.01"
+      - "mom.abs_eta <= 4"
+      - "num_sihit >= 3"
+      - "calib_energy_ecal >= 0.01"
+      - "calib_energy_hcal >= 0.01"
+
+    neutral_hadron_reconstructable_loose:
+      - "is_neutral_hadron"
+      - "mom.r >= 0.01"
+      - "mom.abs_eta <= 4"
+      - "calib_energy_ecal >= 0.1"
+      - "calib_energy_hcal >= 0.1"
+
+  residual_metrics: {}
+  residual_histograms: {}
+  residual_histogram_plots: {}
+  bins: {}
+  histograms: {}
+  bulk_metrics: {}
